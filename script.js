@@ -7,7 +7,7 @@ function gerarManifest() {
         return;
     }
 
-    const url = `https://generator.ryuu.lol/secure_download?appid=${appid}&auth_code=RYUUMANIFESTbx69ko`;
+    const url = `https://generator.ryuu.lol/secure_download?appid=${appid}&auth_code=RYUUMANIFESTbx69kodfvxzxce`;
 
     // Redireciona para o link gerado
     window.location.href = url;
