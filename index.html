@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baixador de Manifests Steam (Ryuu)</title>
+    <!-- Carrega Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configuração de fontes e cores do Tailwind -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'steam-blue': '#1b2838',
+                        'steam-dark': '#171a21',
+                        'steam-light': '#66c0f4',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Define a fonte Inter (ou fallback) e o background principal */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0c0f14;
+            color: #ffffff;
+        }
+        /* Custom spinner for loading indication */
+        .spinner {
+            border-top-color: '#66c0f4';
+            border-color: 'rgba(255, 255, 255, 0.2)';
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-2xl bg-steam-dark p-8 rounded-xl shadow-2xl border border-steam-blue">
+        <h1 class="text-3xl font-bold text-center text-steam-light mb-6">
+            Steam Manifest Downloader
+        </h1>
+        <p class="text-center text-gray-400 mb-8">
+            Obtenha as chaves de Depot e Manifest IDs através da API Ryuu.
+        </p>
+
+        <!-- Área de Entrada -->
+        <div class="flex flex-col space-y-4 md:flex-row md:space-x-4 md:space-y-0 mb-6">
+            <input type="number" id="appIdInput" placeholder="Digite o App ID do Steam (ex: 860510)"
+                class="flex-grow p-3 bg-steam-blue/20 text-white border border-steam-light/50 rounded-lg focus:ring-steam-light focus:border-steam-light transition"
+                value="860510"
+            />
+            <button id="downloadButton"
+                class="px-6 py-3 bg-steam-light text-steam-dark font-bold rounded-lg hover:bg-steam-light/80 transition shadow-md active:scale-95 disabled:opacity-50"
+                onclick="downloadManifests()"
+            >
+                Baixar Manifests
+            </button>
+        </div>
+
+        <!-- Área de Status e Resultados -->
+        <div id="statusArea" class="p-4 bg-steam-blue/20 rounded-lg text-center font-semibold mb-6 hidden">
+            <div id="statusText" class="text-steam-light">Aguardando...</div>
+            <div id="loadingSpinner" class="spinner mt-2 mx-auto w-6 h-6 border-4 border-t-4 border-t-steam-light border-gray-500 rounded-full animate-spin hidden"></div>
+        </div>
+
+        <div id="resultsContainer" class="mt-8">
+            <h2 class="text-xl font-semibold text-steam-light mb-3 border-b border-gray-700 pb-1 hidden" id="resultsTitle">
+                Resultados da API:
+            </h2>
+            <div id="resultsList" class="space-y-4 text-sm break-all">
+                <!-- Resultados serão injetados aqui -->
+            </div>
+            <!-- Área de saída bruta (visível apenas em caso de erro JSON) -->
+            <textarea id="rawOutput" readonly class="mt-4 w-full h-32 p-3 bg-red-900/10 text-red-300 rounded-lg text-xs hidden font-mono" placeholder="Saída Bruta da API"></textarea>
+            <button id="copyButton" class="mt-3 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition disabled:opacity-50 hidden" onclick="copyResults()">
+                Copiar Resultados
+            </button>
+        </div>
+        
+    </div>
+
+    <script>
+        // Chave de autenticação Ryuu (Usada nos seus arquivos Python)
+        const RYUU_AUTH_CODE = "RYUUMANIFESTbx69ko";
+        const MANIFEST_DATA_URL = "https://generator.ryuu.lol/secure_download";
+        
+        // Elementos DOM
+        const statusArea = document.getElementById('statusArea');
+        const statusText = document.getElementById('statusText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const resultsTitle = document.getElementById('resultsTitle');
+        const resultsList = document.getElementById('resultsList');
+        const rawOutput = document.getElementById('rawOutput');
+        const downloadButton = document.getElementById('downloadButton');
+        const copyButton = document.getElementById('copyButton');
+
+        /**
+         * Atualiza a área de status e controla o spinner e o botão.
+         * @param {string} message - A mensagem de status a ser exibida.
+         * @param {boolean} isError - Se é uma mensagem de erro (usa cor vermelha).
+         * @param {boolean} isLoading - Se está carregando (usa spinner e desativa o botão).
+         */
+        function setStatus(message, isError = false, isLoading = false) {
+            statusArea.classList.remove('hidden');
+
+            // Reset classes
+            statusArea.classList.remove('bg-red-900/40', 'bg-green-900/40', 'bg-steam-blue/20', 'text-red-300', 'text-green-300', 'text-steam-light');
+            statusText.classList.remove('text-red-300', 'text-green-300', 'text-steam-light');
+
+            if (isError) {
+                statusArea.classList.add('bg-red-900/40');
+                statusText.classList.add('text-red-300');
+            } else if (!isLoading) {
+                statusArea.classList.add('bg-green-900/40');
+                statusText.classList.add('text-green-300');
+            } else {
+                statusArea.classList.add('bg-steam-blue/20');
+                statusText.classList.add('text-steam-light');
+            }
+
+            statusText.textContent = message;
+            
+            if (isLoading) {
+                loadingSpinner.classList.remove('hidden');
+                downloadButton.disabled = true;
+            } else {
+                loadingSpinner.classList.add('hidden');
+                downloadButton.disabled = false;
+            }
+        }
+
+        /**
+         * Exibe a lista formatada de Depots e Keys.
+         * @param {object} data - O objeto JSON validado da API.
+         */
+        function displayResults(data) {
+            resultsList.innerHTML = '';
+            resultsTitle.classList.remove('hidden');
+            copyButton.classList.remove('hidden');
+            rawOutput.classList.add('hidden'); // Oculta a saída bruta no sucesso
+
+            const keys = data.depot_keys;
+            
+            if (keys && keys.length > 0) {
+                setStatus(`✅ Sucesso! ${keys.length} Depots encontrados.`, false, false);
+
+                keys.forEach(item => {
+                    const depotId = item.depot_id;
+                    const key = item.key;
+                    const manifestId = item.latest_manifest_id || 'N/A';
+
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'p-3 bg-steam-blue/30 rounded-lg border border-steam-blue/50';
+                    itemDiv.innerHTML = `
+                        <p class="text-sm font-bold text-steam-light">Depot ID: ${depotId}</p>
+                        <p class="text-xs text-gray-400">Manifest ID: ${manifestId}</p>
+                        <p class="text-xs text-gray-200">Key: <span class="font-mono">${key}</span></p>
+                    `;
+                    resultsList.appendChild(itemDiv);
+                });
+            } else {
+                 setStatus('⚠️ Resposta Válida, mas sem chaves de Depot (App ID pode estar incorreto ou indisponível).', true, false);
+            }
+        }
+
+        /**
+         * Exibe uma mensagem de erro e opcionalmente o conteúdo cru da resposta.
+         * @param {string} message - A mensagem de erro amigável.
+         * @param {string | null} rawContent - O conteúdo cru da resposta para debug.
+         */
+        function handleError(message, rawContent = null) {
+            setStatus(`❌ Erro: ${message}`, true, false);
+            resultsTitle.classList.add('hidden');
+            resultsList.innerHTML = '';
+            copyButton.classList.add('hidden');
+
+            if (rawContent) {
+                rawOutput.value = `ERRO DE PARSING JSON (RESPOSTA CRUA):\n${rawContent}`;
+                rawOutput.classList.remove('hidden');
+                // Permite copiar a saída bruta em caso de erro
+                copyButton.classList.remove('hidden'); 
+            } else {
+                rawOutput.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Função principal que chama a API Ryuu.
+         */
+        async function downloadManifests() {
+            const appId = document.getElementById('appIdInput').value.trim();
+            if (!appId || isNaN(appId)) {
+                handleError("Por favor, insira um App ID numérico válido.");
+                return;
+            }
+
+            setStatus("Consultando API...", false, true);
+            resultsList.innerHTML = '';
+            resultsTitle.classList.add('hidden');
+            rawOutput.classList.add('hidden');
+            copyButton.classList.add('hidden');
+
+            // --- AQUI É ONDE O APP ID É INSERIDO DINAMICAMENTE NA URL ---
+            const url = `${MANIFEST_DATA_URL}?appid=${appId}&auth_code=${RYUU_AUTH_CODE}`;
+
+            try {
+                const response = await fetch(url);
+                const rawContent = await response.text();
+
+                if (!response.ok) {
+                    // Trata erros HTTP 4xx/5xx, usando o texto cru como mensagem
+                    throw new Error(`Erro HTTP ${response.status}: ${rawContent}`);
+                }
+
+                // Tenta fazer o parsing JSON. Este é o ponto crítico.
+                let data;
+                try {
+                    data = JSON.parse(rawContent);
+                } catch (e) {
+                    // Erro de JSONDecodeError. Mostra a resposta crua da API.
+                    handleError("A API Ryuu retornou uma mensagem de erro que não é JSON. Verifique a saída bruta.", rawContent);
+                    return;
+                }
+                
+                // Se chegou aqui, o JSON é válido
+                displayResults(data);
+
+            } catch (error) {
+                // Trata erros de rede, timeout, ou a exceção do throw Error acima
+                handleError(error.message);
+            }
+        }
+        
+        /**
+         * Copia os resultados formatados (sucesso) ou o conteúdo cru (erro) para a área de transferência.
+         */
+        function copyResults() {
+            let textToCopy;
+            if (rawOutput.value && !rawOutput.classList.contains('hidden')) {
+                // Se houver erro e o rawOutput estiver visível
+                textToCopy = rawOutput.value;
+            } else {
+                // Caso de sucesso: formata o texto para ser copiável
+                const appId = document.getElementById('appIdInput').value.trim();
+                let output = `Manifest Keys para AppID: ${appId}\n\n`;
+                
+                resultsList.querySelectorAll('.p-3').forEach(div => {
+                    // Extrai as informações dos elementos HTML gerados
+                    const depotId = div.querySelector('.font-bold').textContent.replace('Depot ID: ', '');
+                    const manifestId = div.querySelector('.text-gray-400').textContent.replace('Manifest ID: ', '');
+                    const key = div.querySelector('.font-mono').textContent;
+                    
+                    output += `Depot ID: ${depotId}\nManifest ID: ${manifestId}\nKey: ${key}\n---\n`;
+                });
+                textToCopy = output;
+            }
+
+            // Copia para a área de transferência
+            try {
+                // Uso execCommand para maior compatibilidade em iFrames
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = textToCopy;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+                setStatus('Resultados copiados para a área de transferência!', false, false);
+            } catch (err) {
+                console.error('Falha ao copiar:', err);
+                setStatus('Falha ao copiar. Tente selecionar o texto da área de saída bruta.', true, false);
+            }
+        }
+    </script>
+</body>
+</html>
